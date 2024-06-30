@@ -2,17 +2,21 @@ package org.javarush.service;
 
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
+import org.hibernate.Transaction;
 import org.javarush.dao.*;
 import org.javarush.entity.*;
+import org.javarush.exception.ServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.Year;
 import java.util.HashSet;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Set;
 
 public class FilmService {
+    private static final Logger logger = LoggerFactory.getLogger(FilmService.class);
     private final SessionFactory sessionFactory;
     private final LanguageDAO languageDAO;
     private final CategoryDAO categoryDAO;
@@ -30,17 +34,25 @@ public class FilmService {
     }
 
     public void newFilmWasMade() {
+        Transaction transaction = null;
         try (Session session = sessionFactory.getCurrentSession()) {
-            session.beginTransaction();
+            transaction = session.beginTransaction();
 
             Language language = languageDAO.getItems(0, 20)
                     .stream()
                     .unordered()
                     .findAny()
-                    .orElseThrow(() -> new NoSuchElementException("No language found"));
+                    .orElseThrow(() -> new ServiceException("No language found"));
 
             List<Category> categories = categoryDAO.getItems(0, 5);
+            if (categories.isEmpty()) {
+                throw new ServiceException("No categories found");
+            }
+
             List<Actor> actors = actorDAO.getItems(0, 20);
+            if (actors.isEmpty()) {
+                throw new ServiceException("No actors found");
+            }
 
             Film film = new Film();
             film.setLanguage(language);
@@ -65,7 +77,20 @@ public class FilmService {
             filmText.setId(film.getId());
             filmTextDAO.save(filmText);
 
-            session.getTransaction().commit();
+            transaction.commit();
+            logger.info("New film '{}' created successfully with ID {}", film.getTitle(), film.getId());
+        } catch (ServiceException e) {
+            if (transaction != null) {
+                transaction.rollback();
+            }
+            logger.error("ServiceException occurred: {}", e.getMessage(), e);
+            throw e;
+        } catch (Exception e) {
+            if (transaction != null) {
+                transaction.rollback();
+            }
+            logger.error("Unexpected exception occurred", e);
+            throw new ServiceException("Failed to create new film", e);
         }
     }
 }
